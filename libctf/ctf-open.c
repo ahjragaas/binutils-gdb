@@ -534,27 +534,11 @@ ctf_set_base (ctf_dict_t *fp, const ctf_header_t *hp, unsigned char *base)
     + hp->btf.bth_str_off;
   fp->ctf_str[CTF_STRTAB_0].cts_len = hp->btf.bth_str_len;
 
-  /* If we have a parent dict name and label, store the relocated string
-     pointers in the CTF dict for easy access later. */
-
-  /* Note: before conversion, these will be set to values that will be
-     immediately invalidated by the conversion process, but the conversion
-     process will call ctf_set_base() again to fix things up.
-
-     These labels are explicitly constrained from being deduplicated (even though
-     .ctf is usually a duplicated name), because they are the key to identifying
-     the parent dict (and determining that this dict is a child) in the first
-     place.  */
-
-  if (hp->cth_parent_name != 0)
-    fp->ctf_parent_name = ctf_strptr (fp, hp->cth_parent_name);
   if (hp->cth_cu_name != 0)
     fp->ctf_cu_name = ctf_strptr (fp, hp->cth_cu_name);
 
   if (fp->ctf_cu_name)
     ctf_dprintf ("ctf_set_base: CU name %s\n", fp->ctf_cu_name);
-  if (fp->ctf_parent_name)
-    ctf_dprintf ("ctf_set_base: parent name %s\n", fp->ctf_parent_name);
 }
 
 static ctf_error_t
@@ -588,14 +572,12 @@ init_static_types (ctf_dict_t *fp, ctf_header_t *cth, int is_btf)
 
   fp->ctf_provtypemax = (uint32_t) -1;
 
-  /* We determine whether the dict is a child or a parent based on the value of
-     cth_parent_name: for BTF this is not enough, because there is no
-     cth_parent_name: instead, we can check the first byte of the strtab, which
-     is always 0 for parents and never 0 for children.  */
+  /* We determine whether the dict is a child or a parent based on the first
+     byte of the strtab, which is always 0 for parents and never 0 for
+     children.  UPTODO make more resilient when ctf_import is redone.  */
 
-  int child = (cth->cth_parent_name != 0
-	       || (fp->ctf_str[CTF_STRTAB_0].cts_len > 0
-		   && fp->ctf_str[CTF_STRTAB_0].cts_strs[0] != 0));
+  int child = (fp->ctf_str[CTF_STRTAB_0].cts_len > 0
+	       && fp->ctf_str[CTF_STRTAB_0].cts_strs[0] != 0);
 
   if (fp->ctf_version < CTF_VERSION_4)
     {
@@ -828,9 +810,8 @@ init_static_types_names_internal (ctf_dict_t *fp, ctf_header_t *cth, int is_btf,
   ctf_ret_t hash_err;
 
   /* See init_static_types.  */
-  int child = (cth->cth_parent_name != 0
-	       || (fp->ctf_str[CTF_STRTAB_0].cts_len > 0
-		   && fp->ctf_str[CTF_STRTAB_0].cts_strs[0] != 0));
+  int child = (fp->ctf_str[CTF_STRTAB_0].cts_len > 0
+	       && fp->ctf_str[CTF_STRTAB_0].cts_strs[0] != 0);
 
   tbuf = (ctf_type_t *) (fp->ctf_buf + cth->btf.bth_type_off);
   tend = (ctf_type_t *) ((uintptr_t) tbuf + cth->btf.bth_type_len);
@@ -1294,7 +1275,6 @@ ctf_flip_header (void *cthp, int is_btf, int ctf_version)
   swap_thing (cth->cth_preamble.ctp_magic_version);
   swap_thing (cth->cth_preamble.ctp_flags);
   swap_thing (cth->cth_cu_name);
-  swap_thing (cth->cth_parent_name);
   swap_thing (cth->cth_parent_strlen);
   swap_thing (cth->cth_parent_ntypes);
   swap_thing (cth->cth_objt_off);
@@ -2017,21 +1997,6 @@ ctf_bufopen (const ctf_sect_t *ctfsect, const ctf_sect_t *symsect,
       goto validation_fail;
     }
 
-  if (_libctf_unlikely_
-      (hp->cth_parent_strlen != 0 &&
-       ((hp->cth_parent_name != 0 && hp->cth_parent_name < hp->cth_parent_strlen)
-	|| (hp->cth_cu_name != 0 && hp->cth_cu_name < hp->cth_parent_strlen))))
-    {
-      ctf_err (err_locus (NULL), ECTF_CORRUPT,
-	       _("parent dict or CU name string offsets "
-		 "(at %x and %x, respectively) are themselves "
-		 "within the parent (upper bound: %x), thus "
-		 "unreachable"), hp->cth_parent_name, hp->cth_cu_name,
-	       hp->cth_parent_strlen);
-      ctf_set_open_errno (errp, ECTF_CORRUPT);
-      goto validation_fail;
-    }
-
   /* Start to fill out the in-memory dict.  */
 
   if ((fp = malloc (sizeof (ctf_dict_t))) == NULL)
@@ -2351,7 +2316,6 @@ ctf_dict_close (ctf_dict_t *fp)
 
   fp->ctf_refcnt--;
   free (fp->ctf_dyn_cu_name);
-  free (fp->ctf_dyn_parent_name);
 
   if (fp->ctf_archive && fp->ctf_archive->ctfi_free_on_dict_close)
     {
@@ -2594,25 +2558,16 @@ ctf_dict_parent (ctf_dict_t *fp)
   return fp->ctf_parent;
 }
 
-/* Return the name of the parent CTF dict, if one exists, or NULL otherwise.  */
+/* Return the name of the parent CTF dict, if one exists, or NULL otherwise.
+   Only v3 dicts have one of these natively: even for v3 dicts, we return the
+   cuname of the parent in preference.  */
 const char *
 ctf_dict_parent_name (ctf_dict_t *fp)
 {
-  return fp->ctf_parent_name;
-}
-
-/* Set the parent name.  It is an error to call this routine without calling
-   ctf_import() at some point.  */
-ctf_ret_t
-ctf_dict_set_parent_name (ctf_dict_t *fp, const char *name)
-{
-  if (fp->ctf_dyn_parent_name != NULL)
-    free (fp->ctf_dyn_parent_name);
-
-  if ((fp->ctf_dyn_parent_name = strdup (name)) == NULL)
-    return (ctf_set_errno (fp, ENOMEM));
-  fp->ctf_parent_name = fp->ctf_dyn_parent_name;
-  return 0;
+  if (!fp->ctf_parent)
+    return fp->ctf_parent_name;
+  else
+    return ctf_dict_cuname (fp->ctf_parent);
 }
 
 /* Return the name of the compilation unit this CTF file applies to.  Usually
@@ -2639,12 +2594,10 @@ ctf_dict_set_cuname (ctf_dict_t *fp, const char *name)
 static ctf_ret_t
 ctf_import_internal (ctf_dict_t *fp, ctf_dict_t *pfp, int unreffed)
 {
-  ctf_ret_t ret;
   ctf_error_t err;
   int no_strings = fp->ctf_flags & LCTF_NO_STR;
   int old_flags = fp->ctf_flags;
   ctf_dict_t *old_parent = fp->ctf_parent;
-  const char *old_parent_name = fp->ctf_parent_name;
   int old_unreffed = fp->ctf_parent_unreffed;
 
   if (pfp == NULL || pfp == fp->ctf_parent)
@@ -2720,10 +2673,6 @@ ctf_import_internal (ctf_dict_t *fp, ctf_dict_t *pfp, int unreffed)
   fp->ctf_pptrtab_len = 0;
   fp->ctf_pptrtab_typemax = 0;
 
-  if (fp->ctf_parent_name == NULL)
-    if ((ret = ctf_dict_set_parent_name (fp, "PARENT")) < 0)
-      return ret;				/* errno is set for us.  */
-
   if (!unreffed)
     pfp->ctf_refcnt++;
 
@@ -2752,7 +2701,6 @@ ctf_import_internal (ctf_dict_t *fp, ctf_dict_t *pfp, int unreffed)
       fp->ctf_flags = old_flags;
       fp->ctf_parent_unreffed = old_unreffed;
       fp->ctf_parent = old_parent;
-      fp->ctf_parent_name = old_parent_name;
 
       if (fp->ctf_parent_unreffed)
 	old_parent->ctf_refcnt++;

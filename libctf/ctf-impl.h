@@ -506,7 +506,6 @@ struct ctf_dict
   struct ctf_dict *ctf_parent;	  /* Parent CTF dict (if any).  */
   int ctf_parent_unreffed;	  /* Parent set by ctf_import_unref?  */
   const char *ctf_parent_name;	  /* Basename of parent (if any).  */
-  char *ctf_dyn_parent_name;	  /* Dynamically allocated name of parent.  */
   uint32_t ctf_refcnt;		  /* Reference count (for parent links).  */
   uint32_t ctf_flags;		  /* Libctf flags (see below).  */
   uint32_t ctf_max_children;	  /* Max number of child dicts.  */
