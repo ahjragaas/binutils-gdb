@@ -240,7 +240,6 @@ typedef struct ctf_err_locus
 
 #define CTF_STR_ATOM_FREEABLE	0x1
 #define CTF_STR_ATOM_IN_PARENT	0x2
-#define CTF_STR_ATOM_NO_DEDUP	0x4
 
 typedef struct ctf_str_atom
 {
@@ -501,8 +500,7 @@ struct ctf_dict
   uint32_t ctf_nprovtypes;	  /* Number of provisional types (convenience).  */
   const char *ctf_add_conflicting; /* cuname of next-added conflicting type.  */
   const ctf_dmodel_t *ctf_dmodel; /* Data model pointer (see above).  */
-  const char *ctf_cu_name;	  /* Compilation unit name (if any).  */
-  char *ctf_dyn_cu_name;	  /* Dynamically allocated name of CU.  */
+  char *ctf_cu_name;		  /* Compilation unit name (if any).  */
   struct ctf_dict *ctf_parent;	  /* Parent CTF dict (if any).  */
   int ctf_parent_unreffed;	  /* Parent set by ctf_import_unref?  */
   const char *ctf_parent_name;	  /* Basename of parent (if any).  */
@@ -848,6 +846,7 @@ extern struct ctf_archive *ctf_arc_open_internal (const char *, ctf_error_t *);
 extern void ctf_arc_close_internal (struct ctf_archive *);
 extern const ctf_preamble_t *ctf_arc_bufpreamble (const ctf_sect_t *);
 extern void *ctf_set_open_errno (ctf_error_t *, ctf_error_t);
+extern ssize_t ctf_buflen (const ctf_sect_t *ctfsect, ctf_error_t *errp);
 extern ctf_ret_t ctf_flip_header (void *, int, int);
 extern ctf_error_t ctf_flip (ctf_dict_t *, ctf_header_t *, unsigned char *,
 			     int is_btf, int to_foreign);

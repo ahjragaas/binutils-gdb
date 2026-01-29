@@ -533,12 +533,6 @@ ctf_set_base (ctf_dict_t *fp, const ctf_header_t *hp, unsigned char *base)
   fp->ctf_str[CTF_STRTAB_0].cts_strs = (const char *) fp->ctf_buf
     + hp->btf.bth_str_off;
   fp->ctf_str[CTF_STRTAB_0].cts_len = hp->btf.bth_str_len;
-
-  if (hp->cth_cu_name != 0)
-    fp->ctf_cu_name = ctf_strptr (fp, hp->cth_cu_name);
-
-  if (fp->ctf_cu_name)
-    ctf_dprintf ("ctf_set_base: CU name %s\n", fp->ctf_cu_name);
 }
 
 static ctf_error_t
@@ -1274,7 +1268,6 @@ ctf_flip_header (void *cthp, int is_btf, int ctf_version)
 
   swap_thing (cth->cth_preamble.ctp_magic_version);
   swap_thing (cth->cth_preamble.ctp_flags);
-  swap_thing (cth->cth_cu_name);
   swap_thing (cth->cth_parent_strlen);
   swap_thing (cth->cth_parent_ntypes);
   swap_thing (cth->cth_objt_off);
@@ -2315,7 +2308,7 @@ ctf_dict_close (ctf_dict_t *fp)
     return;
 
   fp->ctf_refcnt--;
-  free (fp->ctf_dyn_cu_name);
+  free (fp->ctf_cu_name);
 
   if (fp->ctf_archive && fp->ctf_archive->ctfi_free_on_dict_close)
     {
@@ -2578,16 +2571,16 @@ ctf_dict_cuname (ctf_dict_t *fp)
   return fp->ctf_cu_name;
 }
 
-/* Set the compilation unit name.  */
+/* Set the compilation unit name.  Not statically stored in most dicts: set at
+   open time, or derived from the archive member name (if any).  */
 ctf_ret_t
 ctf_dict_set_cuname (ctf_dict_t *fp, const char *name)
 {
-  if (fp->ctf_dyn_cu_name != NULL)
-    free (fp->ctf_dyn_cu_name);
+  if (fp->ctf_cu_name != NULL)
+    free (fp->ctf_cu_name);
 
-  if ((fp->ctf_dyn_cu_name = strdup (name)) == NULL)
+  if ((fp->ctf_cu_name = strdup (name)) == NULL)
     return (ctf_set_errno (fp, ENOMEM));
-  fp->ctf_cu_name = fp->ctf_dyn_cu_name;
   return 0;
 }
 
